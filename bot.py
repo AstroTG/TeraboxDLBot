@@ -1,85 +1,72 @@
+import asyncio
 import logging
 import time
 
 import humanreadable as hr
-from telethon import Button
-from telethon.sync import TelegramClient, events
-from telethon.tl.custom.message import Message
-from telethon.types import UpdateNewMessage
+from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 
-from config import (ADMINS, API_HASH, API_ID, BOT_TOKEN, BOT_USERNAME,
-                    FORCE_LINK)
+from config import ADMINS, API_HASH, API_ID, BOT_TOKEN, BOT_USERNAME, FORCE_LINK
 from redis_db import db
 from send_media import VideoSender
 from tools import generate_shortenedUrl, is_user_on_chat, remove_all_videos
 
 log = logging.getLogger(__name__)
 
-bot = TelegramClient("bot", API_ID, API_HASH)
+bot = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 
-@bot.on(
-    events.NewMessage(
-        pattern="/start$",
-        incoming=True,
-        outgoing=False,
-        func=lambda x: x.is_private,
-    )
-)
-async def start(m: Message):
+@bot.on(filters.command("start") & filters.private)
+async def start(client: Client, message: Message):
     reply_text = """
 Hello there! I'm your friendly video downloader bot specially designed to fetch videos from Terabox. Share the Terabox link with me, and I'll swiftly get started on downloading it for you.
 
 Let's make your video experience even better!
 """
-    await m.reply(
+    await message.reply_text(
         reply_text,
-        link_preview=False,
+        disable_web_page_preview=True,
         parse_mode="markdown",
-        buttons=[
+        reply_markup=InlineKeyboardMarkup(
             [
-                Button.url(
-                    "Website Source Code", url="https://github.com/r0ld3x/terabox-app"
-                ),
-                Button.url(
-                    "Bot Source Code",
-                    url="https://github.com/r0ld3x/terabox-downloader-bot",
-                ),
-            ],
-            [
-                Button.url("Channel ", url="https://t.me/RoldexVerse"),
-                Button.url("Group ", url="https://t.me/RoldexVerseChats"),
-            ],
-        ],
+                [
+                    InlineKeyboardButton(
+                        "Website Source Code",
+                        url="https://github.com/r0ld3x/terabox-app",
+                    ),
+                    InlineKeyboardButton(
+                        "Bot Source Code",
+                        url="https://github.com/r0ld3x/terabox-downloader-bot",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton("Channel ", url="https://t.me/RoldexVerse"),
+                    InlineKeyboardButton("Group ", url="https://t.me/RoldexVerseChats"),
+                ],
+            ]
+        ),
     )
 
 
-@bot.on(
-    events.NewMessage(
-        pattern="/gen$",
-        incoming=True,
-        outgoing=False,
-        func=lambda x: x.is_private,
-    )
-)
-async def generate_token(m: Message):
-    is_user_active = db.get(f"active_{m.sender_id}")
+@bot.on(filters.command("gen") & filters.private)
+async def generate_token(client: Client, message: Message):
+    is_user_active = db.get(f"active_{message.from_user.id}")
     if is_user_active:
-        ttl = db.ttl(f"active_{m.sender_id}")
+        ttl = db.ttl(f"active_{message.from_user.id}")
         t = hr.Time(str(ttl), default_unit=hr.Time.Unit.SECOND)
-        return await m.reply(
+        return await message.reply_text(
             f"""You are already active.
 Your session will expire in {t.to_humanreadable()}."""
         )
-    shortenedUrl = generate_shortenedUrl(m.sender_id)
+    shortenedUrl = generate_shortenedUrl(message.from_user.id)
     if not shortenedUrl:
-        return await m.reply("Something went wrong. Please try again.")
-    # if_token_avl = db.get(f"token_{m.sender_id}")
+        return await message.reply_text("Something went wrong. Please try again.")
+    # if_token_avl = db.get(f"token_{message.from_user.id}")
     # if not if_token_avl:
     # else:
     #     uid, shortenedUrl = if_token_avl.split("|")
     text = f"""
-Hey {m.sender.first_name or m.sender.username}!
+Hey {message.from_user.first_name or message.from_user.username}!
 
 It seems like your Ads token has expired. Please refresh your token and try again.
 
@@ -91,87 +78,119 @@ This is an Ads token. After viewing 1 ad, you can utilize the bot for the next 1
 Keep the interactions going smoothly! 😊
 """
 
-    await m.reply(
+    await message.reply_text(
         text,
-        link_preview=False,
+        disable_web_page_preview=True,
         parse_mode="markdown",
-        buttons=[Button.url("Click here To Refresh Token", url=shortenedUrl)],
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Click here To Refresh Token", url=shortenedUrl)]]
+        ),
     )
-
 
 @bot.on(
-    events.NewMessage(
-        pattern=r"/start (?!token_)([0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12})",
-        incoming=True,
-        outgoing=False,
-        func=lambda x: x.is_private,
+    filters.command("start")
+    & filters.private
+    & filters.regex(
+        r"(?!token_)([0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12})"
     )
 )
-async def start_ntoken(m: Message):
-    if m.sender_id not in ADMINS:
-        if_token_avl = db.get(f"active_{m.sender_id}")
-        if not if_token_avl:
-            return await m.reply(
+async def start_ntoken(client: Client, message: Message):
+    uuid_match = re.search(
+        r"(?!token_)([0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12})",
+        message.text,
+    )
+    if uuid_match:
+        text = uuid_match.group(1)
+    else:
+        return await message.reply_text("Invalid UUID format.")
+
+    if message.from_user.id not in ADMINS:
+        is_user_active = db.get(f"active_{message.from_user.id}")
+        if not is_user_active:
+            return await message.reply_text(
                 "Your account is deactivated. send /gen to get activate it again."
             )
-    text = m.pattern_match.group(1)
+
     fileid = db.get_key(str(text))
     if fileid:
         return await VideoSender.forward_file(
-            file_id=fileid, message=m, client=bot, uid=text.strip()
+            file_id=fileid, message=message, client=client, uid=text.strip()
         )
     else:
-        return await m.reply("""your requested file is not available.""")
+        return await message.reply_text("""your requested file is not available.""")
 
 
 @bot.on(
-    events.NewMessage(
-        pattern=r"/start token_([0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12})",
-        incoming=True,
-        outgoing=False,
-        func=lambda x: x.is_private,
+    filters.command("start")
+    & filters.private
+    & filters.regex(
+        r"token_([0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12})"
     )
 )
-async def start_token(m: Message):
-    uuid = m.pattern_match.group(1).strip()
-    check_if = await is_user_on_chat(bot, FORCE_LINK, m.peer_id)
-    if not check_if:
-        return await m.reply(
-            "You haven't joined @RoldexVerse or @RoldexVerseChats yet. Please join the channel and then send me the link again.\nThank you!",
-            buttons=[
-                [
-                    Button.url("RoldexVerse", url="https://t.me/RoldexVerse"),
-                    Button.url("RoldexVerseChats",
-                               url="https://t.me/RoldexVerseChats"),
-                ],
-                [
-                    Button.url(
-                        "ReCheck ♻️",
-                        url=f"https://{BOT_USERNAME}.t.me?start={uuid}",
-                    ),
-                ],
-            ],
+async def start_token(client: Client, message: Message):
+    uuid_match = re.search(
+        r"token_([0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12})",
+        message.text,
+    )
+    if uuid_match:
+        uuid = uuid_match.group(1).strip()
+    else:
+        return await message.reply_text("Invalid UUID format.")
+
+    try:
+        check_if = await is_user_on_chat(client, FORCE_LINK, message.from_user.id)
+    except PeerIdInvalid:
+        return await message.reply_text(
+            "The bot cannot access the channel/group. Please ensure the bot is an administrator in the FORCE_LINK channel/group."
         )
-    is_user_active = db.get(f"active_{m.sender_id}")
+          if not check_if:
+        return await message.reply_text(
+            "You haven't joined @RoldexVerse or @RoldexVerseChats yet. Please join the channel and then send me the link again.\nThank you!",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton("RoldexVerse", url="https://t.me/RoldexVerse"),
+                        InlineKeyboardButton(
+                            "RoldexVerseChats", url="https://t.me/RoldexVerseChats"
+                        ),
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "ReCheck ♻️",
+                            url=f"https://t.me/{BOT_USERNAME}?start=token_{uuid}",
+                        ),
+                    ],
+                ]
+            ),
+        )
+
+    is_user_active = db.get(f"active_{message.from_user.id}")
     if is_user_active:
-        ttl = db.ttl(f"active_{m.sender_id}")
+        ttl = db.ttl(f"active_{message.from_user.id}")
         t = hr.Time(str(ttl), default_unit=hr.Time.Unit.SECOND)
-        return await m.reply(
+        return await message.reply_text(
             f"""You are already active.
 Your session will expire in {t.to_humanreadable()}."""
         )
+
     if_token_avl = db.get(f"token_{uuid}")
     if not if_token_avl:
-        return await generate_token(m)
+        return await generate_token(client, message)
+
     sender_id, shortenedUrl = if_token_avl.split("|")
-    if m.sender_id != int(sender_id):
-        return await m.reply(
+    if message.from_user.id != int(sender_id):
+        return await message.reply_text(
             "Your token is invalid. Please try again.\n Hit /gen to get a new token."
         )
-    set_user_active = db.set(f"active_{m.sender_id}", time.time(), ex=3600)
+
+    set_user_active = db.set(f"active_{message.from_user.id}", time.time(), ex=3600)
     db.delete(f"token_{uuid}")
+
     if set_user_active:
-        return await m.reply("Your account is active. It will expire after 1 hour.")
+        return await message.reply_text(
+            "Your account is active. It will expire after 1 hour."
+        )
+      
 
 
 @bot.on(
