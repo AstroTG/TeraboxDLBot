@@ -1,13 +1,12 @@
-API_ID = 123456  # api id
-API_HASH = "ABC-DEF1234ghIkl-zyx57W2v1u123ew11"  # api hash
-
-BOT_TOKEN = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"  # bot token
+BOT_TOKEN = "7929469838:AAEQN6NJI8iDafx_o72Bo7t-aS8x9FnTaZU"
+API_ID = "22136772"
+API_HASH = "7541e5b6d298eb1f60dac89aae92868c"
 
 
 # REDIS
-HOST = "localhost"  # redis host uri
+HOST = "redis-14246.c11.us-east-1-2.ec2.redns.redis-cloud.com"  # redis host uri
 PORT = 6379  # redis port
-PASSWORD = ""  # redis password
+PASSWORD = "4fgJqY6jfIOQbvLsOgfXP4NziSDktXDW"  # redis password
 
 PRIVATE_CHAT_ID = -1001234567890  # CHAT WHERE YOU WANT TO STORE VIDEOS
 # COOKIE FOR AUTHENTICATION (get from chrome dev tools) ex: "PANWEB=1; csrfToken=;
@@ -20,4 +19,4 @@ BOT_USERNAME = "AstroTeraboxDLBot"
 # Force user to join this channel. (make sure you have promoted the bot on this chat.)
 FORCE_LINK = "@AstroBotz"
 
-PUBLIC_EARN_API = ""  # https://publicearn.com/api
+GP_LINKS_API = "b363858e31838295a55341bea42a07ed4766beb1"
