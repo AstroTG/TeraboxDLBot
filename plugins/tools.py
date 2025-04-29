@@ -11,7 +11,7 @@ from PIL import Image
 from telethon import TelegramClient
 
 from config import BOT_USERNAME, PUBLIC_EARN_API
-from redis_db import db
+from database import db
 
 
 def check_url_patterns(url: str) -> bool:
