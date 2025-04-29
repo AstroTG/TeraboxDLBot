@@ -1,3 +1,6 @@
+pyrogram
+tgcrypto
+pyromod==1.5
 telethon
 cryptg
 pyaes
