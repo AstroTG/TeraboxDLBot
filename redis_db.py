@@ -76,9 +76,9 @@ class Redis(r):
 
 
 db = Redis(
-    host=HOST,
-    port=PORT,
-    password=PASSWORD if len(PASSWORD) > 1 else None,
+    host="redis-12345.c16.us-east-1-2.ec2.cloud.redislabs.com",
+    port=17713,
+    password=password,
     decode_responses=True,
 )
 
