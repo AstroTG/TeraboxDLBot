@@ -8,9 +8,11 @@ import humanreadable as hr
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 
-from config import ADMINS, API_HASH, API_ID, BOT_TOKEN, BOT_USERNAME, FORCE_LINK
-from redis_db import db
+from config import ADMINS, BOT_USERNAME, FORCE_LINK, HOST, PASSWORD, PORT
+from database import db
 from send_media import VideoSender
+from terabox import get_data
+from tools import extract_code_from_url, get_urls_from_string
 
 log = logging.getLogger(__name__)
 
@@ -71,7 +73,7 @@ def remove_all_videos():
     except Exception as e:
         print(f"Error: {e}")
 
-@bot.on_message(filters.command("start") & filters.private)
+@Client.on_message(filters.command("start") & filters.private)
 async def start(client: Client, message: Message):
     reply_text = """
 Hello there! I'm your friendly video downloader bot specially designed to fetch videos from Terabox. Share the Terabox link with me, and I'll swiftly get started on downloading it for you.
@@ -85,7 +87,7 @@ Let's make your video experience even better!
     )
 
 
-@bot.on_message(filters.command("gen") & filters.private)
+@Client.on_message(filters.command("gen") & filters.private)
 async def generate_token(client: Client, message: Message):
     is_user_active = db.get(f"active_{message.from_user.id}")
     if is_user_active:
@@ -124,7 +126,7 @@ Keep the interactions going smoothly! 😊
         ),
     )
 
-@bot.on_message(filters.command("start") & filters.private & filters.regex(r"(?!token_)([0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12})"))
+@Client.on_message(filters.command("start") & filters.private & filters.regex(r"(?!token_)([0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12})"))
 async def start_ntoken(client: Client, message: Message):
     uuid_match = re.search(
         r"(?!token_)([0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12})",
@@ -151,7 +153,7 @@ async def start_ntoken(client: Client, message: Message):
         return await message.reply_text("""your requested file is not available.""")
 
 
-@bot.on_message(filters.command("start") & filters.private & filters.regex(r"token_([0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12})"))
+@Client.on_message(filters.command("start") & filters.private & filters.regex(r"token_([0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12})"))
 async def start_token(client: Client, message: Message):
     uuid_match = re.search(
         r"token_([0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12})",
@@ -218,7 +220,7 @@ Your session will expire in {t.to_humanreadable()}."""
       
 
 
-@bot.on(filters.command("remove") & filters.user(ADMINS) & filters.text)
+@Client.on(filters.command("remove") & filters.user(ADMINS) & filters.text)
 async def remove(client: Client, message: Message):
     try:
         user_id = message.text.split(" ")[1]  # Extract user ID from command
@@ -232,7 +234,79 @@ async def remove(client: Client, message: Message):
         await message.reply_text(f"{user_id} is not in the list.")
 
 
-@bot.on(filters.command("removeall") & filters.user(ADMINS))
+@Client.on(filters.command("removeall") & filters.user(ADMINS))
 async def removeall(client: Client, message: Message):
     remove_all_videos()
     await message.reply_text("Removed all videos from the list.")
+
+@Client.on_message(filters.private & filters.text & lambda client, message: get_urls_from_string(message.text))
+async def get_message(client: Client, message: Message):
+    await handle_message(client, message)
+
+
+async def handle_message(client: Client, message: Message):
+    urls = get_urls_from_string(message.text)
+    if not urls:
+        return await message.reply_text("Please enter a valid URL.")
+
+    url = urls[0]  # Use the first URL if multiple are found
+
+    hm = await message.reply_text("Sending you the media, wait...")
+
+    is_spam = db.get(message.from_user.id)
+    if is_spam and message.from_user.id not in ADMINS:
+        ttl = db.ttl(message.from_user.id)
+        t = hr.Time(str(ttl), default_unit=hr.Time.Unit.SECOND)
+        return await hm.edit_text(
+            f"You are spamming.\n**Please wait {t.to_humanreadable()} and try again.**",
+            parse_mode="markdown",
+        )
+
+    if_token_avl = db.get(f"active_{message.from_user.id}")
+    if not if_token_avl and message.from_user.id not in ADMINS:
+        return await hm.edit_text(
+            "Your account is deactivated. send /gen to get activate it again."
+        )
+
+    shorturl = extract_code_from_url(url)
+    if not shorturl:
+        return await hm.edit_text("Seems like your link is invalid.")
+
+    fileid = db.get_key(shorturl)
+    if fileid:
+        uid = db.get_key(f"mid_{fileid}")
+        if uid:
+            check = await VideoSender.forward_file(
+                file_id=fileid, message=message, client=client, edit_message=hm, uid=uid
+            )
+            if check:
+                return
+
+    try:
+        data = get_data(url)
+    except Exception as e:
+        log.exception(f"Error getting data from URL: {url}, {e}")
+        return await hm.edit_text(
+            "Sorry! API is dead, the link is broken, or an error occurred."
+        )
+
+    if not data:
+        return await hm.edit_text("Sorry! API is dead or maybe your link is broken.")
+
+    db.set(message.from_user.id, time.monotonic(), ex=60)
+
+    if int(data["sizebytes"]) > 4294967296 and message.from_user.id not in ADMINS:
+        return await hm.edit_text(
+            f"Sorry! File is too big.\n**I can download only 4 GB and this file is of {data['size']}.**\nRather you can download this file from the link below:\n{data['url']}",
+            parse_mode="markdown",
+            disable_web_page_preview=True
+        )
+
+    sender = VideoSender(
+        client=client,
+        data=data,
+        message=message,
+        edit_message=hm,
+        url=url,
+    )
+    asyncio.create_task(sender.send_video())
