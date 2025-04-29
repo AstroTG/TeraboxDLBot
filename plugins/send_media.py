@@ -16,7 +16,7 @@ from telethon.types import UpdateEditMessage
 from cansend import CanSend
 from config import BOT_USERNAME, PRIVATE_CHAT_ID
 from FastTelethon import upload_file
-from redis_db import db
+from database import db
 from tools import (
     convert_seconds,
     download_file,
